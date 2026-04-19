@@ -1,0 +1,39 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "CipherScribe (Debug)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "args": [
+                "--dart-define",
+                "SIGNING_HASH=1AMFO5RT11O1libfgsmgPbL7D2AzVNFwxi0nrZxDUww=",
+                "--dart-define",
+                "IOS_TEAM_ID=YOUR_TEAM_ID_HERE"
+            ]
+        },
+
+        {
+            "name": "Cipher-Scribe",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "Cipher-Scribe (profile mode)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "Cipher-Scribe (release mode)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        }
+    ]
+}

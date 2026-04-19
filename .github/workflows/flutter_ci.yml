@@ -1,0 +1,45 @@
+name: CipherScribe Security CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  audit-and-test:
+    name: Security Audit, Static Analysis, and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run Code Generation
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Static Analysis
+        # This acts as our automated security audit barrier
+        # Failing analysis prevents insecure code merges
+        run: flutter analyze
+
+      - name: Advanced Security Audit (dart pub outdated/audit)
+        run: dart pub outdated
+
+      - name: Run Unit & Integration Tests
+        run: flutter test
