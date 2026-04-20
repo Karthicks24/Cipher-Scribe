@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:cryptography/cryptography.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:cipherscribe/core/database/database.dart';
@@ -6,7 +7,7 @@ import 'package:cipherscribe/services/crypto_service.dart';
 
 abstract class VaultLocalDataSource {
   Future<List<Document>> getDocuments();
-  Future<Document> importDocument(File file);
+  Future<Document> importDocument(File file, SecretKey sessionKey);
   Future<void> deleteDocument(int id);
 }
 
@@ -25,23 +26,23 @@ class VaultLocalDataSourceImpl implements VaultLocalDataSource {
   }
 
   @override
-  Future<Document> importDocument(File file) async {
+  Future<Document> importDocument(File file, SecretKey sessionKey) async {
     final fileName = p.basename(file.path);
     final clearText = await file.readAsBytes();
     
-    // Simulate derived session key
-    final secretKey = await cryptoService.deriveKey(password: 'session_pin', salt: 'session_salt');
-    
-    // Encrypt file
-    final encryptedData = await cryptoService.encryptData(clearText.toList(), secretKey);
+    // Encrypt file using the Master DEK (sessionKey)
+    final encryptedData = await cryptoService.encryptData(clearText.toList(), sessionKey);
     
     // Securely wipe cleartext from memory
-    cryptoService.zeroOutMemory(clearText);
+    cryptoService.wipeRAM(clearText);
 
     // Save encrypted blob to app storage
     final appDir = await getApplicationDocumentsDirectory();
-    final encryptedFileName = '${DateTime.now().millisecondsSinceEpoch}_$fileName.enc';
-    final encryptedFile = File(p.join(appDir.path, encryptedFileName));
+    final blobDir = Directory(p.join(appDir.path, 'blobs'));
+    if (!await blobDir.exists()) await blobDir.create(recursive: true);
+
+    final encryptedFileName = '${DateTime.now().millisecondsSinceEpoch}_$fileName.scribeblob';
+    final encryptedFile = File(p.join(blobDir.path, encryptedFileName));
     await encryptedFile.writeAsBytes(encryptedData);
 
     // Insert metadata into Drift
@@ -68,3 +69,4 @@ class VaultLocalDataSourceImpl implements VaultLocalDataSource {
     }
   }
 }
+

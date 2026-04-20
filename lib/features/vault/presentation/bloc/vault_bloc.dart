@@ -5,16 +5,20 @@ import 'package:cipherscribe/features/vault/domain/entities/vault_document.dart'
 import 'package:cipherscribe/features/vault/domain/usecases/vault_usecases.dart';
 import 'package:cipherscribe/core/error/failures.dart';
 
+import 'package:cryptography/cryptography.dart';
+
 part 'vault_event.dart';
 part 'vault_state.dart';
 
 class VaultBloc extends Bloc<VaultEvent, VaultState> {
   final GetDocumentsUseCase getDocuments;
   final ImportDocumentUseCase importDocument;
+  final SecretKey sessionKey;
 
   VaultBloc({
     required this.getDocuments,
     required this.importDocument,
+    required this.sessionKey,
   }) : super(VaultInitial()) {
     on<LoadVaultDocuments>(_onLoadDocuments);
     on<ImportNewDocument>(_onImportDocument);
@@ -34,7 +38,7 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
     final currentState = state;
     if (currentState is VaultLoaded) {
       emit(VaultLoading());
-      final result = await importDocument(event.file);
+      final result = await importDocument(event.file, sessionKey);
       
       if (result is Success<VaultDocument, Failure>) {
         final updatedList = List<VaultDocument>.from(currentState.documents)..add(result.value);

@@ -3,6 +3,7 @@ import 'package:cipherscribe/core/error/failures.dart';
 import 'package:cipherscribe/features/vault/domain/entities/vault_document.dart';
 import 'package:cipherscribe/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cipherscribe/features/vault/data/datasources/vault_local_datasource.dart';
+import 'package:cryptography/cryptography.dart';
 
 class VaultRepositoryImpl implements VaultRepository {
   final VaultLocalDataSource localDataSource;
@@ -25,10 +26,12 @@ class VaultRepositoryImpl implements VaultRepository {
     }
   }
 
+
+
   @override
-  Future<Result<VaultDocument, Failure>> importDocument(File file) async {
+  Future<Result<VaultDocument, Failure>> importDocument(File file, SecretKey sessionKey) async {
     try {
-      final storedDocument = await localDataSource.importDocument(file);
+      final storedDocument = await localDataSource.importDocument(file, sessionKey);
       final entity = VaultDocument(
         id: storedDocument.id,
         fileName: storedDocument.fileName,
@@ -40,6 +43,7 @@ class VaultRepositoryImpl implements VaultRepository {
       return ErrorResult<VaultDocument, Failure>(CryptoFailure());
     }
   }
+
 
   @override
   Future<Result<void, Failure>> deleteDocument(int id) async {
