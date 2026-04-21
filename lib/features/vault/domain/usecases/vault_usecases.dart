@@ -24,3 +24,23 @@ class GetDocumentsUseCase {
     return await repository.getDocuments();
   }
 }
+
+class DeleteDocumentUseCase {
+  final VaultRepository repository;
+
+  DeleteDocumentUseCase(this.repository);
+
+  Future<Result<void, Failure>> call(int id) async {
+    return await repository.deleteDocument(id);
+  }
+}
+
+class RenameDocumentUseCase {
+  final VaultRepository repository;
+
+  RenameDocumentUseCase(this.repository);
+
+  Future<Result<void, Failure>> call(int id, String newName) async {
+    return await repository.renameDocument(id, newName);
+  }
+}

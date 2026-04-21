@@ -7,5 +7,6 @@ abstract class VaultRepository {
   Future<Result<List<VaultDocument>, Failure>> getDocuments();
   Future<Result<VaultDocument, Failure>> importDocument(File file, SecretKey sessionKey);
   Future<Result<void, Failure>> deleteDocument(int id);
+  Future<Result<void, Failure>> renameDocument(int id, String newName);
 }
 

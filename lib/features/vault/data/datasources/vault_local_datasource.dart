@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:cryptography/cryptography.dart';
+import 'package:drift/drift.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:cipherscribe/core/database/database.dart';
@@ -9,6 +10,7 @@ abstract class VaultLocalDataSource {
   Future<List<Document>> getDocuments();
   Future<Document> importDocument(File file, SecretKey sessionKey);
   Future<void> deleteDocument(int id);
+  Future<void> renameDocument(int id, String newName);
 }
 
 class VaultLocalDataSourceImpl implements VaultLocalDataSource {
@@ -28,6 +30,16 @@ class VaultLocalDataSourceImpl implements VaultLocalDataSource {
   @override
   Future<Document> importDocument(File file, SecretKey sessionKey) async {
     final fileName = p.basename(file.path);
+    final fileSize = await file.length();
+    final extension = p.extension(file.path).toLowerCase();
+    
+    String fileType = 'other';
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].contains(extension)) {
+      fileType = 'image';
+    } else if (extension == '.pdf') {
+      fileType = 'pdf';
+    }
+
     final clearText = await file.readAsBytes();
     
     // Encrypt file using the Master DEK (sessionKey)
@@ -50,6 +62,8 @@ class VaultLocalDataSourceImpl implements VaultLocalDataSource {
       DocumentsCompanion.insert(
         fileName: fileName,
         filePath: encryptedFile.path,
+        fileType: Value(fileType),
+        fileSize: Value(fileSize),
       ),
     );
 
@@ -67,6 +81,12 @@ class VaultLocalDataSourceImpl implements VaultLocalDataSource {
       }
       await (database.delete(database.documents)..where((t) => t.id.equals(id))).go();
     }
+  }
+  @override
+  Future<void> renameDocument(int id, String newName) async {
+    await (database.update(database.documents)..where((t) => t.id.equals(id))).write(
+      DocumentsCompanion(fileName: Value(newName)),
+    );
   }
 }
 

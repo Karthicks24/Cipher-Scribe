@@ -18,6 +18,8 @@ class VaultRepositoryImpl implements VaultRepository {
         id: doc.id,
         fileName: doc.fileName,
         filePath: doc.filePath,
+        fileType: doc.fileType,
+        fileSize: doc.fileSize,
         createdAt: doc.createdAt,
       )).toList();
       return Success<List<VaultDocument>, Failure>(entities);
@@ -36,6 +38,8 @@ class VaultRepositoryImpl implements VaultRepository {
         id: storedDocument.id,
         fileName: storedDocument.fileName,
         filePath: storedDocument.filePath,
+        fileType: storedDocument.fileType,
+        fileSize: storedDocument.fileSize,
         createdAt: storedDocument.createdAt,
       );
       return Success<VaultDocument, Failure>(entity);
@@ -49,6 +53,16 @@ class VaultRepositoryImpl implements VaultRepository {
   Future<Result<void, Failure>> deleteDocument(int id) async {
     try {
       await localDataSource.deleteDocument(id);
+      return Success<void, Failure>(null);
+    } catch (e) {
+      return ErrorResult<void, Failure>(StorageFailure());
+    }
+  }
+
+  @override
+  Future<Result<void, Failure>> renameDocument(int id, String newName) async {
+    try {
+      await localDataSource.renameDocument(id, newName);
       return Success<void, Failure>(null);
     } catch (e) {
       return ErrorResult<void, Failure>(StorageFailure());

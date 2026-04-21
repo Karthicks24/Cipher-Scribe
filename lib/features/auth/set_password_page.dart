@@ -25,7 +25,11 @@ class SetPasswordPage extends StatefulWidget {
   final VoidCallback onSetupComplete;
   final Uint8List? importedDek;
 
-  const SetPasswordPage({super.key, required this.onSetupComplete, this.importedDek});
+  const SetPasswordPage({
+    super.key,
+    required this.onSetupComplete,
+    this.importedDek,
+  });
 
   @override
   State<SetPasswordPage> createState() => _SetPasswordPageState();
@@ -53,6 +57,10 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   String _confirmPin = '';
   bool _isConfirmingPin = false; // false = entering, true = confirming
 
+  double _strength = 0;
+  String _strengthLabel = '';
+  Color _strengthColor = Colors.transparent;
+
   Uint8List? _generatedDEK;
   String _mnemonic = '';
   bool _isLoading = false;
@@ -62,8 +70,8 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   bool _showPass = false;
 
   // ── Security Questions State ────────────────────────────────────────────────
-  int? _question1Index;
-  int? _question2Index;
+  int? _question1Index = 0;
+  int? _question2Index = 1;
   final _answer1Controller = TextEditingController();
   final _answer2Controller = TextEditingController();
 
@@ -76,11 +84,19 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   @override
   void initState() {
     super.initState();
-    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
-    _slideCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    _fadeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _slideCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeInOut);
-    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut));
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.05),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut));
     _fadeCtrl.forward();
     _slideCtrl.forward();
     _generateInitialKeys();
@@ -95,6 +111,39 @@ class _SetPasswordPageState extends State<SetPasswordPage>
         _mnemonic = mnemonic;
       });
     }
+  }
+
+  void _evaluateStrength() {
+    final pw = _credentialController.text;
+    double score = 0;
+    if (pw.length >= 8) score += 0.25;
+    if (pw.length >= 12) score += 0.15;
+    if (pw.contains(RegExp(r'[A-Z]'))) score += 0.2;
+    if (pw.contains(RegExp(r'[0-9]'))) score += 0.2;
+    if (pw.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]'))) score += 0.2;
+
+    String label;
+    Color color;
+    if (score < 0.35) {
+      label = 'Weak';
+      color = AppColors.darkError;
+    } else if (score < 0.65) {
+      label = 'Fair';
+      color = AppColors.darkWarning;
+    } else if (score < 0.85) {
+      label = 'Strong';
+      color = AppColors.darkSecondary;
+    } else {
+      label = 'Very Strong';
+      color = AppColors.darkSuccess;
+    }
+
+    setState(() {
+      _strength = score.clamp(0.0, 1.0);
+      _strengthLabel = pw.isEmpty ? '' : label;
+      _strengthColor = color;
+      _errorMessage = '';
+    });
   }
 
   @override
@@ -120,6 +169,10 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   // ── PIN keypad logic ──────────────────────────────────────────────────────
   void _onPinKey(String digit) {
     setState(() => _errorMessage = '');
+    if (digit == '✓') {
+      _validateAndProceed();
+      return;
+    }
     if (!_isConfirmingPin) {
       if (_pin.length < 6) {
         _pin += digit;
@@ -128,10 +181,6 @@ class _SetPasswordPageState extends State<SetPasswordPage>
     } else {
       if (_confirmPin.length < 6) {
         _confirmPin += digit;
-        if (_confirmPin.length == 6) {
-          // Auto-validate when confirm is full
-          _validateAndProceed();
-        }
       }
     }
     setState(() {});
@@ -139,9 +188,13 @@ class _SetPasswordPageState extends State<SetPasswordPage>
 
   void _onPinBackspace() {
     if (!_isConfirmingPin) {
-      if (_pin.isNotEmpty) setState(() => _pin = _pin.substring(0, _pin.length - 1));
+      if (_pin.isNotEmpty)
+        setState(() => _pin = _pin.substring(0, _pin.length - 1));
     } else {
-      if (_confirmPin.isNotEmpty) setState(() => _confirmPin = _confirmPin.substring(0, _confirmPin.length - 1));
+      if (_confirmPin.isNotEmpty)
+        setState(
+          () => _confirmPin = _confirmPin.substring(0, _confirmPin.length - 1),
+        );
     }
   }
 
@@ -152,7 +205,10 @@ class _SetPasswordPageState extends State<SetPasswordPage>
           setState(() => _errorMessage = 'Enter a 6-digit PIN.');
           return;
         }
-        setState(() { _isConfirmingPin = true; _errorMessage = ''; });
+        setState(() {
+          _isConfirmingPin = true;
+          _errorMessage = '';
+        });
       } else {
         if (_pin != _confirmPin) {
           setState(() {
@@ -161,57 +217,36 @@ class _SetPasswordPageState extends State<SetPasswordPage>
           });
           return;
         }
-        _animateTransition(() => setState(() {
-          _errorMessage = '';
-          _step = _SetupStep.securityQuestions;
-        }));
+        _animateTransition(
+          () => setState(() {
+            _errorMessage = '';
+            _step = _SetupStep.securityQuestions;
+          }),
+        );
       }
     } else {
       final pass = _credentialController.text;
       final confirm = _confirmController.text;
-      if (_getPasswordStrength(pass) == 0) {
+      if (_strength < 0.35) {
         setState(() => _errorMessage = 'Password is too weak.');
         return;
       }
       if (pass.length < 8) {
-        setState(() => _errorMessage = 'Password must be at least 8 characters.');
+        setState(
+          () => _errorMessage = 'Password must be at least 8 characters.',
+        );
         return;
       }
       if (pass != confirm) {
         setState(() => _errorMessage = 'Passwords do not match.');
         return;
       }
-      _animateTransition(() => setState(() {
-        _errorMessage = '';
-        _step = _SetupStep.securityQuestions;
-      }));
-    }
-  }
-
-  int _getPasswordStrength(String pass) {
-    if (pass.isEmpty) return 0; // None
-    int strength = 0;
-    if (pass.length >= 8) strength++;
-    if (RegExp(r'[A-Z]').hasMatch(pass) && RegExp(r'[a-z]').hasMatch(pass)) strength++;
-    if (RegExp(r'[0-9]').hasMatch(pass) || RegExp(r'[!@#\$&*~]').hasMatch(pass)) strength++;
-    return strength; // 1 = Poor, 2 = Good, 3 = Great
-  }
-
-  String _getStrengthText(int strength) {
-    switch (strength) {
-      case 1: return 'Weak';
-      case 2: return 'Good';
-      case 3: return 'Great';
-      default: return '';
-    }
-  }
-
-  Color _getStrengthColor(int strength) {
-    switch (strength) {
-      case 1: return Colors.orange;
-      case 2: return Colors.blue;
-      case 3: return Colors.green;
-      default: return Colors.transparent;
+      _animateTransition(
+        () => setState(() {
+          _errorMessage = '';
+          _step = _SetupStep.securityQuestions;
+        }),
+      );
     }
   }
 
@@ -223,9 +258,18 @@ class _SetPasswordPageState extends State<SetPasswordPage>
         mnemonic: _mnemonic,
         dekHex: _crypto.hexEncode(_generatedDEK!),
       );
-      if (mounted) setState(() { _pdfSaved = true; _isLoading = false; });
+      if (mounted) {
+        setState(() {
+          _pdfSaved = true;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() { _isLoading = false; _errorMessage = 'Failed to generate PDF: $e'; });
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to generate PDF: $e';
+        });
     }
   }
 
@@ -239,7 +283,10 @@ class _SetPasswordPageState extends State<SetPasswordPage>
 
   Future<void> _finalizeSetup() async {
     if (_generatedDEK == null) return;
-    setState(() { _isLoading = true; _errorMessage = ''; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
 
     try {
       final credential = _usePin ? _pin : _credentialController.text;
@@ -253,13 +300,21 @@ class _SetPasswordPageState extends State<SetPasswordPage>
       final wrappedDek = await _crypto.wrapDEK(_generatedDEK!, kek);
 
       // 2. Secondary wrap: Security Questions
-      final combinedAnswers = _answer1Controller.text.trim().toLowerCase() + _answer2Controller.text.trim().toLowerCase();
-      final backupKek = await _crypto.deriveKEK(pin: combinedAnswers, salt: salt);
+      final combinedAnswers =
+          _answer1Controller.text.trim().toLowerCase() +
+          _answer2Controller.text.trim().toLowerCase();
+      final backupKek = await _crypto.deriveKEK(
+        pin: combinedAnswers,
+        salt: salt,
+      );
       final backupWrappedDek = await _crypto.wrapDEK(_generatedDEK!, backupKek);
 
       await _storage.saveWrappedDEK(wrappedDek);
-      await _storage.writeString('cs_backup_wrapped_dek', _crypto.hexEncode(Uint8List.fromList(backupWrappedDek)));
-      
+      await _storage.writeString(
+        'cs_backup_wrapped_dek',
+        _crypto.hexEncode(Uint8List.fromList(backupWrappedDek)),
+      );
+
       // Save Question Indexes so we can ask them later
       await _storage.writeString('cs_security_q1', _question1Index.toString());
       await _storage.writeString('cs_security_q2', _question2Index.toString());
@@ -335,19 +390,39 @@ class _SetPasswordPageState extends State<SetPasswordPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(CupertinoIcons.shield_lefthalf_fill, color: primary, size: 44),
-              const SizedBox(height: 14),
-              Text(
-                _isConfirmingPin ? 'Confirm Your PIN' : (_usePin ? 'Create a PIN' : 'Create a Password'),
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, 
-                  color: isDark ? Colors.white : Colors.black87),
+              Row(
+                spacing: 16,
+                children: [
+                  Icon(
+                    CupertinoIcons.shield_lefthalf_fill,
+                    color: primary,
+                    size: 44,
+                  ),
+                  Text(
+                    _isConfirmingPin
+                        ? 'Confirm Your PIN'
+                        : (_usePin ? 'Create a PIN' : 'Create a Password'),
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 14),
+
+              // const SizedBox(height: 6),
               Text(
-                _isConfirmingPin 
-                  ? 'Enter your PIN one more time to verify.' 
-                  : (_usePin ? 'Choose a 6-digit PIN to protect your vault.' : 'Choose a strong password to protect your vault.'),
-                style: TextStyle(fontSize: 14, color: isDark ? Colors.white60 : Colors.black54),
+                _isConfirmingPin
+                    ? 'Enter your PIN one more time to verify.'
+                    : (_usePin
+                          ? 'Choose a 6-digit PIN to protect your vault.'
+                          : 'Choose a strong password to protect your vault.'),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
               ),
               const SizedBox(height: 20),
 
@@ -365,21 +440,31 @@ class _SetPasswordPageState extends State<SetPasswordPage>
 
         // ── Input Area ────────────────────────────────────────────────────
         if (_usePin) ...[
-          _buildPinDots(
-            isDark, 
-            primary, 
-            current: _isConfirmingPin ? _confirmPin : _pin,
+          Expanded(
+            child: Column(
+              children: [
+                const Spacer(flex: 1),
+                _buildPinDots(
+                  isDark,
+                  primary,
+                  current: _isConfirmingPin ? _confirmPin : _pin,
+                ),
+                const SizedBox(height: 24),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: _errorMessage.isNotEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 28),
+                          child: _buildErrorBanner(),
+                        )
+                      : const SizedBox(height: 44),
+                ),
+                const Spacer(flex: 2),
+                _buildKeypad(isDark, primary),
+                const SizedBox(height: 32),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: _errorMessage.isNotEmpty
-              ? _buildErrorBanner()
-              : const SizedBox(height: 44),
-          ),
-          const Spacer(),
-          _buildKeypad(isDark, primary),
-          const SizedBox(height: 32),
         ] else ...[
           Expanded(
             child: SingleChildScrollView(
@@ -394,7 +479,9 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                     showText: _showPass,
                     onToggleShow: () => setState(() => _showPass = !_showPass),
                     hint: 'Min. 8 characters',
-                    onSubmitted: (_) => FocusScope.of(context).requestFocus(_confirmFocus),
+                    onSubmitted: (_) =>
+                        FocusScope.of(context).requestFocus(_confirmFocus),
+                    onChanged: (_) => _evaluateStrength(),
                   ),
                   const SizedBox(height: 16),
                   _buildPasswordField(
@@ -403,42 +490,19 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                     label: 'Confirm Password',
                     isDark: isDark,
                     showText: _showConfirmPass,
-                    onToggleShow: () => setState(() => _showConfirmPass = !_showConfirmPass),
+                    onToggleShow: () =>
+                        setState(() => _showConfirmPass = !_showConfirmPass),
                     hint: 'Re-enter password',
                     onSubmitted: (_) => _validateAndProceed(),
+                    onChanged: (_) => setState(() {}),
                   ),
-                  const SizedBox(height: 12),
-                  ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: _credentialController,
-                    builder: (context, value, _) {
-                      final strength = _getPasswordStrength(value.text);
-                      return Row(
-                        children: [
-                          Expanded(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: strength == 0 ? 0 : strength / 3,
-                                backgroundColor: isDark ? Colors.white12 : Colors.black12,
-                                valueColor: AlwaysStoppedAnimation<Color>(_getStrengthColor(strength)),
-                                minHeight: 6,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            _getStrengthText(strength).isEmpty ? 'Too Weak' : _getStrengthText(strength),
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _getStrengthColor(strength)),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+                  const SizedBox(height: 16),
+                  _buildStrengthIndicator(isDark),
                   const SizedBox(height: 16),
                   if (_errorMessage.isNotEmpty) _buildErrorBanner(),
                   const SizedBox(height: 24),
                   _infoCard(
-                    CupertinoIcons.info, 
+                    CupertinoIcons.info,
                     'Your password derives a unique key. We never store it — only an encrypted form of your vault key.',
                     isDark,
                   ),
@@ -446,7 +510,8 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                   ValueListenableBuilder<TextEditingValue>(
                     valueListenable: _credentialController,
                     builder: (context, value, child) {
-                      final strength = _getPasswordStrength(value.text);
+                      // final strength = _getPasswordStrength(value.text);
+                      final strength = _strength;
                       return _buildPrimaryButton(
                         label: 'Continue',
                         primary: strength > 0 ? primary : Colors.grey,
@@ -474,9 +539,22 @@ class _SetPasswordPageState extends State<SetPasswordPage>
             children: [
               Icon(CupertinoIcons.person_3_fill, color: primary, size: 44),
               const SizedBox(height: 14),
-              Text('Security Questions', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+              Text(
+                'Security Questions',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
               const SizedBox(height: 6),
-              Text('In case you forget your ${_usePin ? 'PIN' : 'password'}, these answers will help you regain block-level access to your vault.', style: TextStyle(fontSize: 14, color: isDark ? Colors.white60 : Colors.black54)),
+              Text(
+                'In case you forget your ${_usePin ? 'PIN' : 'password'}, these answers will help you regain block-level access to your vault.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
+              ),
               const SizedBox(height: 20),
               // We reuse 0 for indicator visually, or just make it 0.5? Let's just use 0.
               _buildStepIndicator(isDark, primary, 0),
@@ -510,24 +588,38 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                 const SizedBox(height: 32),
                 _buildPrimaryButton(
                   label: 'Save & Continue',
-                  primary: (_question1Index != null && _question2Index != null && _answer1Controller.text.trim().isNotEmpty && _answer2Controller.text.trim().isNotEmpty) ? primary : Colors.grey,
+                  primary:
+                      (_answer1Controller.text.trim().isNotEmpty &&
+                          _answer2Controller.text.trim().isNotEmpty)
+                      ? primary
+                      : Colors.grey,
                   onTap: () {
                     if (_question1Index == null || _question2Index == null) {
-                      setState(() => _errorMessage = 'Please select both questions.');
+                      setState(
+                        () => _errorMessage = 'Please select both questions.',
+                      );
                       return;
                     }
                     if (_question1Index == _question2Index) {
-                      setState(() => _errorMessage = 'Please select two distinct questions.');
+                      setState(
+                        () => _errorMessage =
+                            'Please select two distinct questions.',
+                      );
                       return;
                     }
-                    if (_answer1Controller.text.trim().isEmpty || _answer2Controller.text.trim().isEmpty) {
-                      setState(() => _errorMessage = 'Please answer both questions.');
+                    if (_answer1Controller.text.trim().isEmpty ||
+                        _answer2Controller.text.trim().isEmpty) {
+                      setState(
+                        () => _errorMessage = 'Please answer both questions.',
+                      );
                       return;
                     }
-                    _animateTransition(() => setState(() {
-                      _errorMessage = '';
-                      _step = _SetupStep.mnemonic;
-                    }));
+                    _animateTransition(
+                      () => setState(() {
+                        _errorMessage = '';
+                        _step = _SetupStep.mnemonic;
+                      }),
+                    );
                   },
                 ),
                 const SizedBox(height: 32),
@@ -539,30 +631,61 @@ class _SetPasswordPageState extends State<SetPasswordPage>
     );
   }
 
-  Widget _buildQuestionPicker(int number, int? selectedIndex, ValueChanged<int> onChanged, bool isDark) {
+  Widget _buildQuestionPicker(
+    int number,
+    int? selectedIndex,
+    ValueChanged<int> onChanged,
+    bool isDark,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Question $number', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey)),
+        Text(
+          'Question $number',
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey,
+          ),
+        ),
         const SizedBox(height: 8),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.04),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.08)),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : Colors.black.withValues(alpha: 0.08),
+            ),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<int>(
               isExpanded: true,
               value: selectedIndex,
-              hint: Text('Select a security question', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
-              dropdownColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+              hint: Text(
+                'Select a security question',
+                style: TextStyle(
+                  color: isDark ? Colors.white54 : Colors.black54,
+                ),
+              ),
+              dropdownColor: isDark
+                  ? AppColors.darkBackground
+                  : AppColors.lightBackground,
               items: List.generate(kSecurityQuestions.length, (i) {
                 return DropdownMenuItem<int>(
                   value: i,
-                  child: Text(kSecurityQuestions[i], style: TextStyle(fontSize: 14, color: isDark ? Colors.white : Colors.black87)),
+                  child: Text(
+                    kSecurityQuestions[i],
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
                 );
               }),
               onChanged: (val) {
@@ -578,18 +701,30 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   Widget _buildAnswerField(TextEditingController controller, bool isDark) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.04),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.06)
+            : Colors.black.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.08)),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.1)
+              : Colors.black.withValues(alpha: 0.08),
+        ),
       ),
       child: TextField(
         controller: controller,
-        style: TextStyle(fontSize: 15, color: isDark ? Colors.white : Colors.black87),
+        style: TextStyle(
+          fontSize: 15,
+          color: isDark ? Colors.white : Colors.black87,
+        ),
         decoration: InputDecoration(
           hintText: 'Your answer...',
           hintStyle: TextStyle(color: isDark ? Colors.white24 : Colors.black26),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
         ),
         onChanged: (_) => setState(() {}),
       ),
@@ -598,7 +733,9 @@ class _SetPasswordPageState extends State<SetPasswordPage>
 
   // ── STEP 2: Mnemonic ──────────────────────────────────────────────────────
   Widget _buildMnemonicStep(bool isDark, Color primary) {
-    final words = _mnemonic.isEmpty ? List.filled(24, '...') : _mnemonic.split(' ');
+    final words = _mnemonic.isEmpty
+        ? List.filled(24, '...')
+        : _mnemonic.split(' ');
     return Column(
       children: [
         Padding(
@@ -606,11 +743,79 @@ class _SetPasswordPageState extends State<SetPasswordPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(CupertinoIcons.doc_text_fill, color: primary, size: 44),
+              Row(
+                spacing: 16,
+                children: [
+                  Icon(CupertinoIcons.doc_text_fill, color: primary, size: 44),
+                  Text(
+                    'Recovery Phrase',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 14),
-              Text('Recovery Phrase', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
-              const SizedBox(height: 6),
-              Text('These 24 words are the only way to restore your vault. Save your PDF before continuing.', style: TextStyle(fontSize: 14, color: isDark ? Colors.white60 : Colors.black54)),
+              Text(
+                'These 24 words are the only way to restore your vault. Save your PDF before continuing.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: _mnemonic));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Copied to clipboard')),
+                  );
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : Colors.black.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.1)
+                          : Colors.black.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Copy to Clipboard',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: _mnemonic));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Copied to clipboard'),
+                            ),
+                          );
+                        },
+                        icon: Icon(
+                          CupertinoIcons.doc_on_clipboard_fill,
+                          color: primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 20),
               _buildStepIndicator(isDark, primary, 1),
             ],
@@ -622,18 +827,27 @@ class _SetPasswordPageState extends State<SetPasswordPage>
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: GridView.builder(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3, childAspectRatio: 2.4, crossAxisSpacing: 6, mainAxisSpacing: 6,
+                crossAxisCount: 3,
+                childAspectRatio: 2.4,
+                crossAxisSpacing: 6,
+                mainAxisSpacing: 6,
               ),
               itemCount: words.length,
               itemBuilder: (context, i) => Container(
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.04),
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Center(
-                  child: Text('${i + 1}. ${words[i]}', 
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, 
-                      color: isDark ? Colors.white : Colors.black87),
+                  child: Text(
+                    '${i + 1}. ${words[i]}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -666,50 +880,84 @@ class _SetPasswordPageState extends State<SetPasswordPage>
 
   // ── STEP 3: Confirm & Secure ──────────────────────────────────────────────
   Widget _buildConfirmStep(bool isDark, Color primary) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 28),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 24),
-          Icon(CupertinoIcons.checkmark_shield_fill, color: Colors.green, size: 44),
+          Icon(
+            CupertinoIcons.checkmark_shield_fill,
+            color: Colors.green,
+            size: 44,
+          ),
           const SizedBox(height: 14),
-          Text('Final Secure Check', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+          Text(
+            'Final Secure Check',
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text('Review your setup before locking the vault.', style: TextStyle(fontSize: 14, color: isDark ? Colors.white60 : Colors.black54)),
+          Text(
+            'Review your setup before locking the vault.',
+            style: TextStyle(
+              fontSize: 14,
+              color: isDark ? Colors.white60 : Colors.black54,
+            ),
+          ),
           const SizedBox(height: 20),
           _buildStepIndicator(isDark, primary, 2),
           const SizedBox(height: 32),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(CupertinoIcons.checkmark_circle_fill, color: Colors.green, size: 72),
-                const SizedBox(height: 24),
-                Text(
-                  'Vault Architecture Ready',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                CupertinoIcons.checkmark_circle_fill,
+                color: Colors.green,
+                size: 72,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Vault Architecture Ready',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'Your Master Key (DEK) is ready to be locked with your ${_usePin ? 'PIN' : 'password'}. '
-                  'Your Recovery PDF is your backup — keep it safe offline.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: isDark ? Colors.white60 : Colors.black54),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Your Master Key (DEK) is ready to be locked with your ${_usePin ? 'PIN' : 'password'}. '
+                'Your Recovery PDF or 24 words are your backup — keep it safe offline.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: isDark ? Colors.white60 : Colors.black54,
                 ),
-                const SizedBox(height: 32),
-                _infoCard(CupertinoIcons.lock_shield, 'After this step, only your ${_usePin ? 'PIN' : 'password'} or recovery phrase can unlock your vault. We have no access.', isDark),
-              ],
-            ),
+              ),
+              const SizedBox(height: 32),
+              _infoCard(
+                CupertinoIcons.lock_shield,
+                'After this step, only your ${_usePin ? 'PIN' : 'password'} or recovery phrase can unlock your vault. We have no access.',
+                isDark,
+              ),
+            ],
           ),
+          const SizedBox(height: 40),
           if (_errorMessage.isNotEmpty) ...[
             _buildErrorBanner(),
             const SizedBox(height: 12),
           ],
           _isLoading
-            ? const Center(child: CupertinoActivityIndicator())
-            : _buildPrimaryButton(label: 'Create Vault', primary: primary, onTap: _finalizeSetup),
-          const SizedBox(height: 32),
+              ? const Center(child: CupertinoActivityIndicator())
+              : _buildPrimaryButton(
+                  label: 'Create Vault',
+                  primary: primary,
+                  onTap: _finalizeSetup,
+                ),
+          const SizedBox(height: 48),
         ],
       ),
     );
@@ -718,16 +966,23 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   // ── Reusable Widgets ──────────────────────────────────────────────────────
   Widget _buildStepIndicator(bool isDark, Color primary, int currentStep) {
     return Row(
-      children: List.generate(3, (i) => Expanded(
-        child: Container(
-          height: 3,
-          margin: const EdgeInsets.only(right: 6),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(2),
-            color: i <= currentStep ? primary : (isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black12),
+      children: List.generate(
+        3,
+        (i) => Expanded(
+          child: Container(
+            height: 3,
+            margin: const EdgeInsets.only(right: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(2),
+              color: i <= currentStep
+                  ? primary
+                  : (isDark
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.black12),
+            ),
           ),
         ),
-      )),
+      ),
     );
   }
 
@@ -735,23 +990,61 @@ class _SetPasswordPageState extends State<SetPasswordPage>
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.05),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.06)
+            : Colors.black.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Expanded(child: _toggleOption(label: '6-Digit PIN', icon: CupertinoIcons.number, active: _usePin, isDark: isDark, primary: primary, onTap: () {
-            setState(() { _usePin = true; _pin = ''; _confirmPin = ''; _isConfirmingPin = false; _errorMessage = ''; });
-          })),
-          Expanded(child: _toggleOption(label: 'Password', icon: CupertinoIcons.keyboard, active: !_usePin, isDark: isDark, primary: primary, onTap: () {
-            setState(() { _usePin = false; _credentialController.clear(); _confirmController.clear(); _errorMessage = ''; });
-          })),
+          Expanded(
+            child: _toggleOption(
+              label: '6-Digit PIN',
+              icon: CupertinoIcons.number,
+              active: _usePin,
+              isDark: isDark,
+              primary: primary,
+              onTap: () {
+                setState(() {
+                  _usePin = true;
+                  _pin = '';
+                  _confirmPin = '';
+                  _isConfirmingPin = false;
+                  _errorMessage = '';
+                });
+              },
+            ),
+          ),
+          Expanded(
+            child: _toggleOption(
+              label: 'Password',
+              icon: CupertinoIcons.keyboard,
+              active: !_usePin,
+              isDark: isDark,
+              primary: primary,
+              onTap: () {
+                setState(() {
+                  _usePin = false;
+                  _credentialController.clear();
+                  _confirmController.clear();
+                  _errorMessage = '';
+                });
+              },
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _toggleOption({required String label, required IconData icon, required bool active, required bool isDark, required Color primary, required VoidCallback onTap}) {
+  Widget _toggleOption({
+    required String label,
+    required IconData icon,
+    required bool active,
+    required bool isDark,
+    required Color primary,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -764,10 +1057,24 @@ class _SetPasswordPageState extends State<SetPasswordPage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 16, color: active ? Colors.white : (isDark ? Colors.white54 : Colors.black54)),
+            Icon(
+              icon,
+              size: 16,
+              color: active
+                  ? Colors.white
+                  : (isDark ? Colors.white54 : Colors.black54),
+            ),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, 
-              color: active ? Colors.white : (isDark ? Colors.white54 : Colors.black54))),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: active
+                    ? Colors.white
+                    : (isDark ? Colors.white54 : Colors.black54),
+              ),
+            ),
           ],
         ),
       ),
@@ -787,7 +1094,12 @@ class _SetPasswordPageState extends State<SetPasswordPage>
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: filled ? primary : Colors.transparent,
-            border: Border.all(color: filled ? primary : (isDark ? Colors.white38 : Colors.black26), width: 1.5),
+            border: Border.all(
+              color: filled
+                  ? primary
+                  : (isDark ? Colors.white38 : Colors.black26),
+              width: 1.5,
+            ),
           ),
         );
       }),
@@ -795,32 +1107,86 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   }
 
   Widget _buildKeypad(bool isDark, Color primary) {
-    const keys = [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['', '0', '⌫']];
-    return Column(
-      children: keys.map((row) => Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: row.map((key) {
-          if (key == '') return const SizedBox(width: 88, height: 88);
-          final isDelete = key == '⌫';
-          return GestureDetector(
-            onTap: () => isDelete ? _onPinBackspace() : _onPinKey(key),
-            child: Container(
-              width: 88,
-              height: 88,
-              margin: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04),
-                borderRadius: BorderRadius.circular(16),
+    const keys = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['✓', '0', '⌫'],
+    ];
+    return Container(
+      // padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      width: double.infinity, // Take full width
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: keys
+            .map(
+              (row) => Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: row.map((key) {
+                  final isDelete = key == '⌫';
+                  final isSubmit = key == '✓';
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 6,
+                      ),
+                      child: GestureDetector(
+                        onTap: () {
+                          if (isDelete) {
+                            _onPinBackspace();
+                          } else if (isSubmit) {
+                            _onPinKey('✓');
+                          } else {
+                            _onPinKey(key);
+                          }
+                        },
+                        child: Container(
+                          height: 65,
+                          // margin: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.black.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Center(
+                            child: isDelete
+                                ? Icon(
+                                    CupertinoIcons.delete_left,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black54,
+                                    size: 22,
+                                  )
+                                : (isSubmit
+                                      ? Icon(
+                                          CupertinoIcons.checkmark_alt,
+                                          color: isDark
+                                              ? AppColors.darkPrimary
+                                              : Colors.black54,
+                                          size: 26,
+                                        )
+                                      : Text(
+                                          key,
+                                          style: TextStyle(
+                                            fontSize: 26,
+                                            fontWeight: FontWeight.w400,
+                                            color: isDark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                          ),
+                                        )),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
-              child: Center(
-                child: isDelete
-                  ? Icon(CupertinoIcons.delete_left, color: isDark ? Colors.white70 : Colors.black54, size: 22)
-                  : Text(key, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w400, color: isDark ? Colors.white : Colors.black87)),
-              ),
-            ),
-          );
-        }).toList(),
-      )).toList(),
+            )
+            .toList(),
+      ),
     );
   }
 
@@ -833,39 +1199,65 @@ class _SetPasswordPageState extends State<SetPasswordPage>
     required VoidCallback onToggleShow,
     String? hint,
     ValueChanged<String>? onSubmitted,
+    ValueChanged<String>? onChanged,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey,
+          ),
+        ),
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.04),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.08)),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : Colors.black.withValues(alpha: 0.08),
+            ),
           ),
           child: TextField(
             controller: controller,
             focusNode: focus,
             obscureText: !showText,
             keyboardType: TextInputType.visiblePassword,
-            style: TextStyle(fontSize: 17, color: isDark ? Colors.white : Colors.black87),
+            style: TextStyle(
+              fontSize: 17,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(color: isDark ? Colors.white24 : Colors.black26),
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white24 : Colors.black26,
+              ),
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
               suffix: GestureDetector(
                 onTap: onToggleShow,
                 child: Padding(
                   padding: const EdgeInsets.only(right: 12),
-                  child: Icon(showText ? CupertinoIcons.eye_slash : CupertinoIcons.eye, 
-                    size: 18, color: Colors.grey),
+                  child: Icon(
+                    showText ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
+                    size: 18,
+                    color: Colors.grey,
+                  ),
                 ),
               ),
             ),
             onSubmitted: onSubmitted,
+            onChanged: onChanged,
           ),
         ),
       ],
@@ -880,9 +1272,14 @@ class _SetPasswordPageState extends State<SetPasswordPage>
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          color: _pdfSaved ? Colors.green.withValues(alpha: 0.1) : primary.withValues(alpha: 0.1),
+          color: _pdfSaved
+              ? Colors.green.withValues(alpha: 0.1)
+              : primary.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _pdfSaved ? Colors.green : primary, width: 1.5),
+          border: Border.all(
+            color: _pdfSaved ? Colors.green : primary,
+            width: 1.5,
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -890,13 +1287,21 @@ class _SetPasswordPageState extends State<SetPasswordPage>
             if (_isLoading)
               const CupertinoActivityIndicator()
             else ...[
-              Icon(_pdfSaved ? CupertinoIcons.checkmark_circle_fill : CupertinoIcons.doc_text_viewfinder, 
-                size: 18, color: _pdfSaved ? Colors.green : primary),
+              Icon(
+                _pdfSaved
+                    ? CupertinoIcons.checkmark_circle_fill
+                    : CupertinoIcons.doc_text_viewfinder,
+                size: 18,
+                color: _pdfSaved ? Colors.green : primary,
+              ),
               const SizedBox(width: 10),
               Text(
                 _pdfSaved ? 'Recovery PDF Saved ✓' : 'Save Recovery PDF',
-                style: TextStyle(fontWeight: FontWeight.bold, 
-                  color: _pdfSaved ? Colors.green : primary, fontSize: 15),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: _pdfSaved ? Colors.green : primary,
+                  fontSize: 15,
+                ),
               ),
             ],
           ],
@@ -905,7 +1310,11 @@ class _SetPasswordPageState extends State<SetPasswordPage>
     );
   }
 
-  Widget _buildPrimaryButton({required String label, required Color primary, VoidCallback? onTap}) {
+  Widget _buildPrimaryButton({
+    required String label,
+    required Color primary,
+    VoidCallback? onTap,
+  }) {
     return SizedBox(
       width: double.infinity,
       height: 54,
@@ -913,7 +1322,14 @@ class _SetPasswordPageState extends State<SetPasswordPage>
         color: primary,
         borderRadius: BorderRadius.circular(14),
         onPressed: onTap,
-        child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.white,
+          ),
+        ),
       ),
     );
   }
@@ -930,7 +1346,12 @@ class _SetPasswordPageState extends State<SetPasswordPage>
         children: [
           Icon(icon, size: 16, color: AppColors.darkPrimary),
           const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 13, color: Colors.grey))),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+          ),
         ],
       ),
     );
@@ -947,11 +1368,98 @@ class _SetPasswordPageState extends State<SetPasswordPage>
       ),
       child: Row(
         children: [
-          const Icon(CupertinoIcons.exclamationmark_circle, color: Colors.red, size: 15),
+          const Icon(
+            CupertinoIcons.exclamationmark_circle,
+            color: Colors.red,
+            size: 15,
+          ),
           const SizedBox(width: 8),
-          Expanded(child: Text(_errorMessage, style: const TextStyle(color: Colors.red, fontSize: 13))),
+          Expanded(
+            child: Text(
+              _errorMessage,
+              style: const TextStyle(color: Colors.red, fontSize: 13),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStrengthIndicator(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: _strength,
+                  backgroundColor: isDark ? Colors.white12 : Colors.black12,
+                  valueColor: AlwaysStoppedAnimation<Color>(_strengthColor),
+                  minHeight: 6,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              _strengthLabel.isEmpty ? 'Too Weak' : _strengthLabel,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: _strengthLabel.isEmpty ? Colors.grey : _strengthColor,
+              ),
+            ),
+          ],
+        ),
+        // const SizedBox(height: 16),
+        // _buildRequirementChecklist(isDark),
+      ],
+    );
+  }
+
+  Widget _buildRequirementChecklist(bool isDark) {
+    final pw = _credentialController.text;
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        _requirementItem('8+ Characters', pw.length >= 8, isDark),
+        _requirementItem('12+ Characters', pw.length >= 12, isDark),
+        _requirementItem('Uppercase', pw.contains(RegExp(r'[A-Z]')), isDark),
+        _requirementItem('Number', pw.contains(RegExp(r'[0-9]')), isDark),
+        _requirementItem(
+          'Special Char',
+          pw.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]')),
+          isDark,
+        ),
+      ],
+    );
+  }
+
+  Widget _requirementItem(String label, bool met, bool isDark) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          met ? CupertinoIcons.checkmark_circle_fill : CupertinoIcons.circle,
+          size: 14,
+          color: met
+              ? AppColors.darkSuccess
+              : (isDark ? Colors.white24 : Colors.black26),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: met
+                ? (isDark ? Colors.white : Colors.black87)
+                : (isDark ? Colors.white38 : Colors.black38),
+          ),
+        ),
+      ],
     );
   }
 }

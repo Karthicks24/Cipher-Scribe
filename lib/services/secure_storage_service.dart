@@ -3,6 +3,8 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 /// Handles hardware-bound secrets, wrapped DEK, failed attempts, and vault security.
 class SecureStorageService {
@@ -145,6 +147,16 @@ class SecureStorageService {
 
   Future<void> deleteKey(String key) async {
     await _storage.delete(key: key);
+  }
+
+  Future<void> nukeAccount() async {
+    await _storage.deleteAll();
+    // Also delete the DB file and blobs
+    final docDir = await getApplicationDocumentsDirectory();
+    final dbFile = File(p.join(docDir.path, 'cipher_scribe.sqlite'));
+    final blobDir = Directory(p.join(docDir.path, 'blobs'));
+    if (await dbFile.exists()) await dbFile.delete();
+    if (await blobDir.exists()) await blobDir.delete(recursive: true);
   }
 }
 

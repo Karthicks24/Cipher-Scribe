@@ -44,6 +44,28 @@ class $DocumentsTable extends Documents
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _fileTypeMeta = const VerificationMeta(
+    'fileType',
+  );
+  @override
+  late final GeneratedColumn<String> fileType = GeneratedColumn<String>(
+    'file_type',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fileSizeMeta = const VerificationMeta(
+    'fileSize',
+  );
+  @override
+  late final GeneratedColumn<int> fileSize = GeneratedColumn<int>(
+    'file_size',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -57,7 +79,14 @@ class $DocumentsTable extends Documents
     defaultValue: currentDateAndTime,
   );
   @override
-  List<GeneratedColumn> get $columns => [id, fileName, filePath, createdAt];
+  List<GeneratedColumn> get $columns => [
+    id,
+    fileName,
+    filePath,
+    fileType,
+    fileSize,
+    createdAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -89,6 +118,18 @@ class $DocumentsTable extends Documents
     } else if (isInserting) {
       context.missing(_filePathMeta);
     }
+    if (data.containsKey('file_type')) {
+      context.handle(
+        _fileTypeMeta,
+        fileType.isAcceptableOrUnknown(data['file_type']!, _fileTypeMeta),
+      );
+    }
+    if (data.containsKey('file_size')) {
+      context.handle(
+        _fileSizeMeta,
+        fileSize.isAcceptableOrUnknown(data['file_size']!, _fileSizeMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -116,6 +157,14 @@ class $DocumentsTable extends Documents
         DriftSqlType.string,
         data['${effectivePrefix}file_path'],
       )!,
+      fileType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}file_type'],
+      ),
+      fileSize: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}file_size'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -133,11 +182,15 @@ class Document extends DataClass implements Insertable<Document> {
   final int id;
   final String fileName;
   final String filePath;
+  final String? fileType;
+  final int? fileSize;
   final DateTime createdAt;
   const Document({
     required this.id,
     required this.fileName,
     required this.filePath,
+    this.fileType,
+    this.fileSize,
     required this.createdAt,
   });
   @override
@@ -146,6 +199,12 @@ class Document extends DataClass implements Insertable<Document> {
     map['id'] = Variable<int>(id);
     map['file_name'] = Variable<String>(fileName);
     map['file_path'] = Variable<String>(filePath);
+    if (!nullToAbsent || fileType != null) {
+      map['file_type'] = Variable<String>(fileType);
+    }
+    if (!nullToAbsent || fileSize != null) {
+      map['file_size'] = Variable<int>(fileSize);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -155,6 +214,12 @@ class Document extends DataClass implements Insertable<Document> {
       id: Value(id),
       fileName: Value(fileName),
       filePath: Value(filePath),
+      fileType: fileType == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fileType),
+      fileSize: fileSize == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fileSize),
       createdAt: Value(createdAt),
     );
   }
@@ -168,6 +233,8 @@ class Document extends DataClass implements Insertable<Document> {
       id: serializer.fromJson<int>(json['id']),
       fileName: serializer.fromJson<String>(json['fileName']),
       filePath: serializer.fromJson<String>(json['filePath']),
+      fileType: serializer.fromJson<String?>(json['fileType']),
+      fileSize: serializer.fromJson<int?>(json['fileSize']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -178,6 +245,8 @@ class Document extends DataClass implements Insertable<Document> {
       'id': serializer.toJson<int>(id),
       'fileName': serializer.toJson<String>(fileName),
       'filePath': serializer.toJson<String>(filePath),
+      'fileType': serializer.toJson<String?>(fileType),
+      'fileSize': serializer.toJson<int?>(fileSize),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -186,11 +255,15 @@ class Document extends DataClass implements Insertable<Document> {
     int? id,
     String? fileName,
     String? filePath,
+    Value<String?> fileType = const Value.absent(),
+    Value<int?> fileSize = const Value.absent(),
     DateTime? createdAt,
   }) => Document(
     id: id ?? this.id,
     fileName: fileName ?? this.fileName,
     filePath: filePath ?? this.filePath,
+    fileType: fileType.present ? fileType.value : this.fileType,
+    fileSize: fileSize.present ? fileSize.value : this.fileSize,
     createdAt: createdAt ?? this.createdAt,
   );
   Document copyWithCompanion(DocumentsCompanion data) {
@@ -198,6 +271,8 @@ class Document extends DataClass implements Insertable<Document> {
       id: data.id.present ? data.id.value : this.id,
       fileName: data.fileName.present ? data.fileName.value : this.fileName,
       filePath: data.filePath.present ? data.filePath.value : this.filePath,
+      fileType: data.fileType.present ? data.fileType.value : this.fileType,
+      fileSize: data.fileSize.present ? data.fileSize.value : this.fileSize,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -208,13 +283,16 @@ class Document extends DataClass implements Insertable<Document> {
           ..write('id: $id, ')
           ..write('fileName: $fileName, ')
           ..write('filePath: $filePath, ')
+          ..write('fileType: $fileType, ')
+          ..write('fileSize: $fileSize, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, fileName, filePath, createdAt);
+  int get hashCode =>
+      Object.hash(id, fileName, filePath, fileType, fileSize, createdAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -222,6 +300,8 @@ class Document extends DataClass implements Insertable<Document> {
           other.id == this.id &&
           other.fileName == this.fileName &&
           other.filePath == this.filePath &&
+          other.fileType == this.fileType &&
+          other.fileSize == this.fileSize &&
           other.createdAt == this.createdAt);
 }
 
@@ -229,17 +309,23 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
   final Value<int> id;
   final Value<String> fileName;
   final Value<String> filePath;
+  final Value<String?> fileType;
+  final Value<int?> fileSize;
   final Value<DateTime> createdAt;
   const DocumentsCompanion({
     this.id = const Value.absent(),
     this.fileName = const Value.absent(),
     this.filePath = const Value.absent(),
+    this.fileType = const Value.absent(),
+    this.fileSize = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   DocumentsCompanion.insert({
     this.id = const Value.absent(),
     required String fileName,
     required String filePath,
+    this.fileType = const Value.absent(),
+    this.fileSize = const Value.absent(),
     this.createdAt = const Value.absent(),
   }) : fileName = Value(fileName),
        filePath = Value(filePath);
@@ -247,12 +333,16 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Expression<int>? id,
     Expression<String>? fileName,
     Expression<String>? filePath,
+    Expression<String>? fileType,
+    Expression<int>? fileSize,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (fileName != null) 'file_name': fileName,
       if (filePath != null) 'file_path': filePath,
+      if (fileType != null) 'file_type': fileType,
+      if (fileSize != null) 'file_size': fileSize,
       if (createdAt != null) 'created_at': createdAt,
     });
   }
@@ -261,12 +351,16 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Value<int>? id,
     Value<String>? fileName,
     Value<String>? filePath,
+    Value<String?>? fileType,
+    Value<int?>? fileSize,
     Value<DateTime>? createdAt,
   }) {
     return DocumentsCompanion(
       id: id ?? this.id,
       fileName: fileName ?? this.fileName,
       filePath: filePath ?? this.filePath,
+      fileType: fileType ?? this.fileType,
+      fileSize: fileSize ?? this.fileSize,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -283,6 +377,12 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     if (filePath.present) {
       map['file_path'] = Variable<String>(filePath.value);
     }
+    if (fileType.present) {
+      map['file_type'] = Variable<String>(fileType.value);
+    }
+    if (fileSize.present) {
+      map['file_size'] = Variable<int>(fileSize.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -295,6 +395,8 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
           ..write('id: $id, ')
           ..write('fileName: $fileName, ')
           ..write('filePath: $filePath, ')
+          ..write('fileType: $fileType, ')
+          ..write('fileSize: $fileSize, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -317,6 +419,8 @@ typedef $$DocumentsTableCreateCompanionBuilder =
       Value<int> id,
       required String fileName,
       required String filePath,
+      Value<String?> fileType,
+      Value<int?> fileSize,
       Value<DateTime> createdAt,
     });
 typedef $$DocumentsTableUpdateCompanionBuilder =
@@ -324,6 +428,8 @@ typedef $$DocumentsTableUpdateCompanionBuilder =
       Value<int> id,
       Value<String> fileName,
       Value<String> filePath,
+      Value<String?> fileType,
+      Value<int?> fileSize,
       Value<DateTime> createdAt,
     });
 
@@ -348,6 +454,16 @@ class $$DocumentsTableFilterComposer
 
   ColumnFilters<String> get filePath => $composableBuilder(
     column: $table.filePath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fileType => $composableBuilder(
+    column: $table.fileType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fileSize => $composableBuilder(
+    column: $table.fileSize,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -381,6 +497,16 @@ class $$DocumentsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get fileType => $composableBuilder(
+    column: $table.fileType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fileSize => $composableBuilder(
+    column: $table.fileSize,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -404,6 +530,12 @@ class $$DocumentsTableAnnotationComposer
 
   GeneratedColumn<String> get filePath =>
       $composableBuilder(column: $table.filePath, builder: (column) => column);
+
+  GeneratedColumn<String> get fileType =>
+      $composableBuilder(column: $table.fileType, builder: (column) => column);
+
+  GeneratedColumn<int> get fileSize =>
+      $composableBuilder(column: $table.fileSize, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -440,11 +572,15 @@ class $$DocumentsTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<String> fileName = const Value.absent(),
                 Value<String> filePath = const Value.absent(),
+                Value<String?> fileType = const Value.absent(),
+                Value<int?> fileSize = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => DocumentsCompanion(
                 id: id,
                 fileName: fileName,
                 filePath: filePath,
+                fileType: fileType,
+                fileSize: fileSize,
                 createdAt: createdAt,
               ),
           createCompanionCallback:
@@ -452,11 +588,15 @@ class $$DocumentsTableTableManager
                 Value<int> id = const Value.absent(),
                 required String fileName,
                 required String filePath,
+                Value<String?> fileType = const Value.absent(),
+                Value<int?> fileSize = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => DocumentsCompanion.insert(
                 id: id,
                 fileName: fileName,
                 filePath: filePath,
+                fileType: fileType,
+                fileSize: fileSize,
                 createdAt: createdAt,
               ),
           withReferenceMapper: (p0) => p0

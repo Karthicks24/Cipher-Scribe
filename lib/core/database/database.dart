@@ -10,6 +10,8 @@ class Documents extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get fileName => text()();
   TextColumn get filePath => text()(); // path to the encrypted file chunk
+  TextColumn get fileType => text().nullable()();
+  IntColumn get fileSize => integer().nullable()(); // Added: Size in bytes
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
 
