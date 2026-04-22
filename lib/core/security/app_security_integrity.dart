@@ -40,7 +40,7 @@ class AppSecurityIntegrity {
 
   static Future<void> _failSafe(SecureStorageService secureStorage) async {
     // print('[CRITICAL SEC] Integrity compromised. Executing fail-safe self-destruct.');
-    await secureStorage.clearMasterKey();
+    await secureStorage.clearMasterDEK();
     exit(0);
   }
 }
