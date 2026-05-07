@@ -1,6 +1,9 @@
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:share_plus/share_plus.dart';
 
 /// Service responsible for generating the Recovery PDF and handling recovery phrases.
 class RecoveryService {
@@ -37,10 +40,13 @@ class RecoveryService {
       ),
     );
 
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: 'CipherScribe_Recovery_Sheet.pdf',
-    );
+    final bytes = await pdf.save();
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/CipherScribe_Recovery_Sheet.pdf');
+    await file.writeAsBytes(bytes);
+
+    // Also trigger a share dialog so the user can easily "download" it to their preferred location
+    await Share.shareXFiles([XFile(file.path)], text: 'Your CipherScribe Recovery Sheet');
   }
 
   pw.Widget _buildHeader() {

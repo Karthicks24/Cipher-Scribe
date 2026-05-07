@@ -1,3 +1,4 @@
+import 'package:cipherscribe/features/auth/presentation/widgets/CustomTextField.dart';
 import 'package:cipherscribe/services/crypto_service.dart';
 import 'package:cipherscribe/services/recovery_service.dart';
 import 'package:flutter/cupertino.dart';
@@ -24,7 +25,6 @@ enum _SetupStep { choose, securityQuestions, mnemonic, confirm }
 class SetPasswordPage extends StatefulWidget {
   final VoidCallback onSetupComplete;
   final Uint8List? importedDek;
-
   const SetPasswordPage({
     super.key,
     required this.onSetupComplete,
@@ -68,6 +68,7 @@ class _SetPasswordPageState extends State<SetPasswordPage>
   bool _pdfSaved = false;
   bool _showConfirmPass = false;
   bool _showPass = false;
+  bool _skippedSecurityQuestions = false;
 
   // ── Security Questions State ────────────────────────────────────────────────
   int? _question1Index = 0;
@@ -300,24 +301,38 @@ class _SetPasswordPageState extends State<SetPasswordPage>
       final wrappedDek = await _crypto.wrapDEK(_generatedDEK!, kek);
 
       // 2. Secondary wrap: Security Questions
-      final combinedAnswers =
-          _answer1Controller.text.trim().toLowerCase() +
-          _answer2Controller.text.trim().toLowerCase();
-      final backupKek = await _crypto.deriveKEK(
-        pin: combinedAnswers,
-        salt: salt,
-      );
-      final backupWrappedDek = await _crypto.wrapDEK(_generatedDEK!, backupKek);
+      if (!_skippedSecurityQuestions) {
+        final combinedAnswers =
+            _answer1Controller.text.trim().toLowerCase() +
+            _answer2Controller.text.trim().toLowerCase();
+        final backupKek = await _crypto.deriveKEK(
+          pin: combinedAnswers,
+          salt: salt,
+        );
+        final backupWrappedDek = await _crypto.wrapDEK(
+          _generatedDEK!,
+          backupKek,
+        );
+
+        await _storage.writeString(
+          'cs_backup_wrapped_dek',
+          _crypto.hexEncode(Uint8List.fromList(backupWrappedDek)),
+        );
+
+        // Save Question Indexes so we can ask them later
+        await _storage.writeString(
+          'cs_security_q1',
+          _question1Index.toString(),
+        );
+        await _storage.writeString(
+          'cs_security_q2',
+          _question2Index.toString(),
+        );
+      }
 
       await _storage.saveWrappedDEK(wrappedDek);
-      await _storage.writeString(
-        'cs_backup_wrapped_dek',
-        _crypto.hexEncode(Uint8List.fromList(backupWrappedDek)),
-      );
 
-      // Save Question Indexes so we can ask them later
-      await _storage.writeString('cs_security_q1', _question1Index.toString());
-      await _storage.writeString('cs_security_q2', _question2Index.toString());
+      await _storage.saveDekHash(_generatedDEK!);
 
       await _storage.markSetupComplete();
 
@@ -398,14 +413,20 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                     color: primary,
                     size: 44,
                   ),
-                  Text(
-                    _isConfirmingPin
-                        ? 'Confirm Your PIN'
-                        : (_usePin ? 'Create a PIN' : 'Create a Password'),
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _isConfirmingPin
+                            ? 'Confirm Your PIN'
+                            : (_usePin ? 'Create a PIN' : 'Create a Password'),
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -471,11 +492,12 @@ class _SetPasswordPageState extends State<SetPasswordPage>
               padding: const EdgeInsets.symmetric(horizontal: 28),
               child: Column(
                 children: [
-                  _buildPasswordField(
+                  Customtextfield(
                     controller: _credentialController,
                     focus: _credentialFocus,
                     label: 'Vault Password',
                     isDark: isDark,
+                    textInputAction: TextInputAction.next,
                     showText: _showPass,
                     onToggleShow: () => setState(() => _showPass = !_showPass),
                     hint: 'Min. 8 characters',
@@ -484,7 +506,7 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                     onChanged: (_) => _evaluateStrength(),
                   ),
                   const SizedBox(height: 16),
-                  _buildPasswordField(
+                  buildPasswordField(
                     controller: _confirmController,
                     focus: _confirmFocus,
                     label: 'Confirm Password',
@@ -617,11 +639,13 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                     _animateTransition(
                       () => setState(() {
                         _errorMessage = '';
+                        _skippedSecurityQuestions = false;
                         _step = _SetupStep.mnemonic;
                       }),
                     );
                   },
                 ),
+
                 const SizedBox(height: 32),
               ],
             ),
@@ -965,9 +989,10 @@ class _SetPasswordPageState extends State<SetPasswordPage>
 
   // ── Reusable Widgets ──────────────────────────────────────────────────────
   Widget _buildStepIndicator(bool isDark, Color primary, int currentStep) {
+    final stepsCount = 3;
     return Row(
       children: List.generate(
-        3,
+        stepsCount,
         (i) => Expanded(
           child: Container(
             height: 3,
@@ -1005,6 +1030,7 @@ class _SetPasswordPageState extends State<SetPasswordPage>
               isDark: isDark,
               primary: primary,
               onTap: () {
+                FocusManager.instance.primaryFocus?.unfocus();
                 setState(() {
                   _usePin = true;
                   _pin = '';
@@ -1023,11 +1049,15 @@ class _SetPasswordPageState extends State<SetPasswordPage>
               isDark: isDark,
               primary: primary,
               onTap: () {
+                FocusManager.instance.primaryFocus?.unfocus();
                 setState(() {
                   _usePin = false;
                   _credentialController.clear();
                   _confirmController.clear();
                   _errorMessage = '';
+                  _strength = 0;
+                  _strengthLabel = '';
+                  _strengthColor = Colors.transparent;
                 });
               },
             ),
@@ -1126,57 +1156,71 @@ class _SetPasswordPageState extends State<SetPasswordPage>
                   final isDelete = key == '⌫';
                   final isSubmit = key == '✓';
                   return Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 6,
-                      ),
-                      child: GestureDetector(
-                        onTap: () {
-                          if (isDelete) {
-                            _onPinBackspace();
-                          } else if (isSubmit) {
-                            _onPinKey('✓');
-                          } else {
-                            _onPinKey(key);
-                          }
-                        },
-                        child: Container(
-                          height: 65,
-                          // margin: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.08)
-                                : Colors.black.withValues(alpha: 0.04),
+                    child: AspectRatio(
+                      aspectRatio: 1.8,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              if (isDelete) {
+                                HapticFeedback.mediumImpact();
+                                _onPinBackspace();
+                              } else if (isSubmit) {
+                                HapticFeedback.lightImpact();
+                                _onPinKey('✓');
+                              } else {
+                                HapticFeedback.lightImpact();
+                                _onPinKey(key);
+                              }
+                            },
                             borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Center(
-                            child: isDelete
-                                ? Icon(
-                                    CupertinoIcons.delete_left,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black54,
-                                    size: 22,
-                                  )
-                                : (isSubmit
-                                      ? Icon(
-                                          CupertinoIcons.checkmark_alt,
-                                          color: isDark
-                                              ? AppColors.darkPrimary
-                                              : Colors.black54,
-                                          size: 26,
-                                        )
-                                      : Text(
-                                          key,
-                                          style: TextStyle(
-                                            fontSize: 26,
-                                            fontWeight: FontWeight.w400,
-                                            color: isDark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                          ),
-                                        )),
+                            splashColor: Colors.blue.withValues(
+                              alpha: 0.3,
+                            ), // ripple
+                            highlightColor: Colors.blue.withValues(
+                              alpha: 0.1,
+                            ), // hold/press color
+                            // behavior: HitTestBehavior.opaque,
+                            child: Ink(
+                              // height: 65,
+                              // margin: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.black.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Center(
+                                child: isDelete
+                                    ? Icon(
+                                        CupertinoIcons.delete_left,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54,
+                                        size: 22,
+                                      )
+                                    : (isSubmit
+                                          ? Icon(
+                                              CupertinoIcons.checkmark_alt,
+                                              color: isDark
+                                                  ? AppColors.darkPrimary
+                                                  : Colors.black54,
+                                              size: 26,
+                                            )
+                                          : Text(
+                                              key,
+                                              style: TextStyle(
+                                                fontSize: 26,
+                                                fontWeight: FontWeight.w400,
+                                                color: isDark
+                                                    ? Colors.white
+                                                    : Colors.black87,
+                                              ),
+                                            )),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1190,79 +1234,79 @@ class _SetPasswordPageState extends State<SetPasswordPage>
     );
   }
 
-  Widget _buildPasswordField({
-    required TextEditingController controller,
-    required FocusNode focus,
-    required String label,
-    required bool isDark,
-    required bool showText,
-    required VoidCallback onToggleShow,
-    String? hint,
-    ValueChanged<String>? onSubmitted,
-    ValueChanged<String>? onChanged,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : Colors.black.withValues(alpha: 0.04),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : Colors.black.withValues(alpha: 0.08),
-            ),
-          ),
-          child: TextField(
-            controller: controller,
-            focusNode: focus,
-            obscureText: !showText,
-            keyboardType: TextInputType.visiblePassword,
-            style: TextStyle(
-              fontSize: 17,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
-            decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: TextStyle(
-                color: isDark ? Colors.white24 : Colors.black26,
-              ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
-              suffix: GestureDetector(
-                onTap: onToggleShow,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: Icon(
-                    showText ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
-                    size: 18,
-                    color: Colors.grey,
-                  ),
-                ),
-              ),
-            ),
-            onSubmitted: onSubmitted,
-            onChanged: onChanged,
-          ),
-        ),
-      ],
-    );
-  }
+  // Widget _buildPasswordField({
+  //   required TextEditingController controller,
+  //   required FocusNode focus,
+  //   required String label,
+  //   required bool isDark,
+  //   required bool showText,
+  //   required VoidCallback onToggleShow,
+  //   String? hint,
+  //   ValueChanged<String>? onSubmitted,
+  //   ValueChanged<String>? onChanged,
+  // }) {
+  //   return Column(
+  //     crossAxisAlignment: CrossAxisAlignment.start,
+  //     children: [
+  //       Text(
+  //         label,
+  //         style: const TextStyle(
+  //           fontSize: 13,
+  //           fontWeight: FontWeight.w600,
+  //           color: Colors.grey,
+  //         ),
+  //       ),
+  //       const SizedBox(height: 8),
+  //       Container(
+  //         decoration: BoxDecoration(
+  //           color: isDark
+  //               ? Colors.white.withValues(alpha: 0.06)
+  //               : Colors.black.withValues(alpha: 0.04),
+  //           borderRadius: BorderRadius.circular(12),
+  //           border: Border.all(
+  //             color: isDark
+  //                 ? Colors.white.withValues(alpha: 0.1)
+  //                 : Colors.black.withValues(alpha: 0.08),
+  //           ),
+  //         ),
+  //         child: TextField(
+  //           controller: controller,
+  //           focusNode: focus,
+  //           obscureText: !showText,
+  //           keyboardType: TextInputType.visiblePassword,
+  //           style: TextStyle(
+  //             fontSize: 17,
+  //             color: isDark ? Colors.white : Colors.black87,
+  //           ),
+  //           decoration: InputDecoration(
+  //             hintText: hint,
+  //             hintStyle: TextStyle(
+  //               color: isDark ? Colors.white24 : Colors.black26,
+  //             ),
+  //             border: InputBorder.none,
+  //             contentPadding: const EdgeInsets.symmetric(
+  //               horizontal: 16,
+  //               vertical: 14,
+  //             ),
+  //             suffix: GestureDetector(
+  //               onTap: onToggleShow,
+  //               child: Padding(
+  //                 padding: const EdgeInsets.only(right: 12),
+  //                 child: Icon(
+  //                   showText ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
+  //                   size: 18,
+  //                   color: Colors.grey,
+  //                 ),
+  //               ),
+  //             ),
+  //           ),
+  //           onSubmitted: onSubmitted,
+  //           onChanged: onChanged,
+  //         ),
+  //       ),
+  //     ],
+  //   );
+  // }
 
   Widget _buildSavePdfButton(bool isDark, Color primary) {
     return CupertinoButton(

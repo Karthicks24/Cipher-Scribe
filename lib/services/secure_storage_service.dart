@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:io';
@@ -15,12 +17,27 @@ class SecureStorageService {
   static const _kSetupDone = 'cs_setup_complete';
   static const _kFailedAttempts = 'cs_failed_login_attempts';
   static const _kAuthMethod = 'cs_auth_method'; // 'pin' or 'password'
+  static const _kBiometricDEK = 'cs_biometric_dek';
   static const _kMaxAttempts = 10;
   
   static const _kQuestion1 = 'cs_security_q1';
   static const _kAnswer1 = 'cs_security_a1_hash';
   static const _kQuestion2 = 'cs_security_q2';
   static const _kAnswer2 = 'cs_security_a2_hash';
+  static const _kDekHash = 'cs_dek_hash';
+
+  // ── DEK Verification ──────────────────────────────────────────────────────
+
+  /// Saves a SHA-256 hash of the DEK for validation purposes.
+  Future<void> saveDekHash(Uint8List dek) async {
+    final hash = sha256.convert(dek).toString();
+    await _storage.write(key: _kDekHash, value: hash);
+  }
+
+  /// Retrieves the stored DEK hash.
+  Future<String?> getDekHash() async {
+    return await _storage.read(key: _kDekHash);
+  }
 
   // ── Internal hash helper ──────────────────────────────────────────────────
   String _sha256(String input) {
@@ -50,7 +67,20 @@ class SecureStorageService {
   /// Destroys the wrapped DEK ("Nuke" feature).
   Future<void> clearMasterDEK() async {
     await _storage.delete(key: _kWrappedDEK);
+    await _storage.delete(key: _kBiometricDEK);
     await resetFailedAttempts();
+  }
+
+  // ── Biometric Caching ─────────────────────────────────────────────────────
+
+  /// Saves the raw DEK (hex encoded) securely for biometric unlock
+  Future<void> saveBiometricDEK(String hexDek) async {
+    await _storage.write(key: _kBiometricDEK, value: hexDek);
+  }
+
+  /// Retrieves the cached DEK for biometric unlock
+  Future<String?> getBiometricDEK() async {
+    return await _storage.read(key: _kBiometricDEK);
   }
 
   // ── Failed Attempts Tracking ──────────────────────────────────────────────

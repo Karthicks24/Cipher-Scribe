@@ -17,6 +17,7 @@ import 'package:cipherscribe/features/auth/restore_vault_page.dart';
 import 'package:cipherscribe/features/auth/set_password_page.dart'
     show kSecurityQuestions, SetPasswordPage;
 import 'package:cipherscribe/core/utils/lifecycle_manager.dart';
+import 'package:local_auth/local_auth.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AuthGate — entry router + unlock screen
@@ -41,6 +42,9 @@ class _AuthGateState extends State<AuthGate>
   bool _isNuked = false;
   String _errorMessage = '';
   Uint8List? _sessionDEK;
+  bool _obscurePassword = true;
+  bool _biometricsAvailable = false;
+  final LocalAuthentication _localAuth = LocalAuthentication();
 
   // ── PIN State ─────────────────────────────────────────────────────────────
   String _pin = '';
@@ -84,6 +88,8 @@ class _AuthGateState extends State<AuthGate>
         Navigator.of(context).popUntil((route) => route.isFirst);
         setState(() {
           _pin = '';
+          _isVerifying = false;
+          _passwordController.clear();
           _errorMessage = 'Session expired for security.';
         });
       }
@@ -98,15 +104,72 @@ class _AuthGateState extends State<AuthGate>
     final wrappedDek = await _storage.getWrappedDEK();
     final method = await _storage.getAuthMethod();
 
+    bool hasBiometrics = false;
+    if (setupDone) {
+      try {
+        final canCheck = await _localAuth.canCheckBiometrics;
+        final isDeviceSupported = await _localAuth.isDeviceSupported();
+        if (canCheck || isDeviceSupported) {
+          final availableBiometrics = await _localAuth.getAvailableBiometrics();
+          if (availableBiometrics.isNotEmpty) {
+            hasBiometrics = true;
+          }
+        }
+      } catch (e) {
+        // Ignore biometrics error
+      }
+    }
+
+    final hexDek = await _storage.getBiometricDEK();
+
     if (mounted) {
       setState(() {
         _isFirstLaunch = !setupDone;
         _isNuked = setupDone && wrappedDek == null;
         _authMethod = method;
+        _biometricsAvailable = hasBiometrics;
         _isLoading = false;
       });
       _fadeCtrl.forward();
-      // if (!_isFirstLaunch && !_isNuked) _tryBiometrics();
+      if (!_isFirstLaunch &&
+          !_isNuked &&
+          _biometricsAvailable &&
+          hexDek != null) {
+        _tryBiometrics();
+      }
+    }
+  }
+
+  Future<void> _tryBiometrics() async {
+    setState(() => _errorMessage = '');
+    try {
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Unlock CipherScribe Vault',
+        biometricOnly: true,
+        persistAcrossBackgrounding: true,
+      );
+
+      if (authenticated && mounted) {
+        final hexDek = await _storage.getBiometricDEK();
+        if (hexDek != null) {
+          final dek = _crypto.hexDecode(hexDek);
+          _sessionDEK = dek;
+          await _storage.resetFailedAttempts();
+          HapticFeedback.mediumImpact();
+          _unlockVault(dek);
+        } else {
+          setState(() {
+            _errorMessage =
+                'Biometric unlock not configured. Please use your PIN/Password.';
+          });
+        }
+      }
+    } catch (e) {
+      // OS handled biometric failure or cancellation
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Biometric authentication failed or canceled.';
+      });
     }
   }
 
@@ -152,6 +215,9 @@ class _AuthGateState extends State<AuthGate>
       if (mounted) {
         _sessionDEK = dek;
         await _storage.resetFailedAttempts();
+        if (_biometricsAvailable) {
+          await _storage.saveBiometricDEK(_crypto.hexEncode(dek));
+        }
         HapticFeedback.mediumImpact();
         _unlockVault(dek);
       }
@@ -159,6 +225,7 @@ class _AuthGateState extends State<AuthGate>
       final attempts = await _storage.incrementFailedAttempts();
       HapticFeedback.vibrate();
       _shakeCtrl.forward(from: 0);
+      if (!mounted) return;
       setState(() {
         _isVerifying = false;
         _pin = '';
@@ -181,7 +248,7 @@ class _AuthGateState extends State<AuthGate>
     final repository = VaultRepositoryImpl(dataSource);
 
     Navigator.of(context)
-        .pushReplacement(
+        .push(
           CupertinoPageRoute(
             builder: (context) => BlocProvider<VaultBloc>(
               create: (_) => VaultBloc(
@@ -221,6 +288,7 @@ class _AuthGateState extends State<AuthGate>
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
                 CupertinoIcons.xmark_shield_fill,
@@ -286,12 +354,13 @@ class _AuthGateState extends State<AuthGate>
                     MediaQuery.of(context).padding.top -
                     MediaQuery.of(context).padding.bottom,
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(height: 52),
                     _buildLockIcon(isDark),
                     const SizedBox(height: 20),
                     Text(
-                      'CipherScribe',
+                      'Cipher Scribe',
                       style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
@@ -338,23 +407,51 @@ class _AuthGateState extends State<AuthGate>
                     else
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 28),
-                        child: CupertinoButton(
-                          color: AppColors.darkPrimary,
-                          borderRadius: BorderRadius.circular(14),
-                          onPressed: () =>
-                              _verifyAuth(_passwordController.text),
-                          child: const SizedBox(
-                            width: double.infinity,
-                            child: Text(
-                              'Unlock',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: Colors.white,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: CupertinoButton(
+                                color: AppColors.darkPrimary,
+                                borderRadius: BorderRadius.circular(14),
+                                onPressed: (_passwordController.text.length < 8)
+                                    ? null
+                                    : () =>
+                                          _verifyAuth(_passwordController.text),
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  child: Text(
+                                    'Unlock',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                      color:
+                                          (_passwordController.text.length < 8)
+                                          ? Colors.white54
+                                          : Colors.white,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
+                            if (_biometricsAvailable) ...[
+                              const SizedBox(width: 12),
+                              CupertinoButton(
+                                padding: const EdgeInsets.all(16),
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.black.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(14),
+                                onPressed: _tryBiometrics,
+                                child: const Icon(
+                                  Icons
+                                      .fingerprint, // Or CupertinoIcons.viewfinder
+                                  color: AppColors.darkPrimary,
+                                  size: 28,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     const SizedBox(height: 16),
@@ -591,7 +688,7 @@ class _AuthGateState extends State<AuthGate>
       ['1', '2', '3'],
       ['4', '5', '6'],
       ['7', '8', '9'],
-      ['', '0', '⌫'],
+      [_biometricsAvailable ? 'bio' : '', '0', '⌫'],
     ];
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -628,37 +725,56 @@ class _AuthGateState extends State<AuthGate>
     if (key == '') return const Expanded(child: SizedBox());
 
     return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        child: CupertinoButton(
-          padding: EdgeInsets.zero,
-          // Visual feedback is key for UX
-          onPressed: () => key == '⌫' ? _onBackspace() : _onKeyPress(key),
-          child: Container(
-            // We don't set a height here; we let the Column/Expanded handle it
-            // OR we set a responsive height using MediaQuery
-            height: 65, // A standard "Paytm" rectangular height
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : Colors.black.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: key == '⌫'
-                  ? Icon(
-                      CupertinoIcons.delete_left,
-                      color: isDark ? Colors.white70 : Colors.black87,
-                      size: 24,
-                    )
-                  : Text(
-                      key,
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w500,
-                        color: isDark ? Colors.white : Colors.black87,
+      child: AspectRatio(
+        aspectRatio: 1.8,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: InkWell(
+            // padding: EdgeInsets.zero,
+            onTap: () {
+              if (key == '⌫') {
+                HapticFeedback.mediumImpact();
+                _onBackspace();
+              } else if (key == 'bio') {
+                HapticFeedback.lightImpact();
+                _tryBiometrics();
+              } else {
+                HapticFeedback.lightImpact();
+                _onKeyPress(key);
+              }
+            },
+            borderRadius: BorderRadius.circular(16),
+            splashColor: Colors.blue.withValues(alpha: 0.3), // ripple
+            highlightColor: Colors.blue.withValues(alpha: 0.1),
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Center(
+                child: key == '⌫'
+                    ? Icon(
+                        CupertinoIcons.delete_left,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                        size: 24,
+                      )
+                    : key == 'bio'
+                    ? const Icon(
+                        Icons.fingerprint,
+                        color: AppColors.darkPrimary,
+                        size: 28,
+                      )
+                    : Text(
+                        key,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                       ),
-                    ),
+              ),
             ),
           ),
         ),
@@ -678,14 +794,29 @@ class _AuthGateState extends State<AuthGate>
         ),
         child: TextField(
           controller: _passwordController,
-          obscureText: true,
+          obscureText: _obscurePassword,
           textAlign: TextAlign.center,
           style: const TextStyle(fontSize: 18, letterSpacing: 2),
-          decoration: const InputDecoration(
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
             hintText: 'Password',
             border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(vertical: 16),
-            hintStyle: TextStyle(letterSpacing: 0),
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 16,
+              horizontal: 12,
+            ),
+            hintStyle: const TextStyle(letterSpacing: 0),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword
+                    ? CupertinoIcons.eye
+                    : CupertinoIcons.eye_slash,
+                color: Colors.grey,
+                size: 20,
+              ),
+              onPressed: () =>
+                  setState(() => _obscurePassword = !_obscurePassword),
+            ),
           ),
           onSubmitted: (val) => _verifyAuth(val),
         ),
